@@ -1,41 +1,28 @@
 /**
  * gravity_sdk.js
- * GRAVITY AgentSDKとの通信をカプセル化するモジュール
- * ローカルテスト環境でのエラー防止機能と、1024バイトのパケット上限防衛を内包します。
+ * GRAVITY親アプリ（ネイティブ側）との通信をカプセル化するモジュール
+ * 
+ * [Version 1.2]
+ * - 修正内容: GRAVITY公式の仕様に基づき、スコア送信ロジックをAgentSDKから
+ *   `window.parent.postMessage` を使用した 'gameOver' イベント通知へ完全移行。
  */
 
 /**
- * ゲームオーバー時のスコアをGRAVITY側へ自動送信します
+ * ゲームオーバー時のスコアをGRAVITYのランキング（リーダーボード）へ送信します
  * @param {number} finalScore - 最終スコア
  */
 export function reportScoreToGravity(finalScore) {
     try {
-        // GRAVITY環境内で AgentSDK が存在するかチェック
-        if (typeof window !== 'undefined' && window.AgentSDK) {
-            
-            // 1. 公式のゲームスコア専用APIが提供されている場合（優先）
-            if (typeof window.AgentSDK.game?.reportScore === 'function') {
-                window.AgentSDK.game.reportScore({ score: finalScore });
-                console.log("[GRAVITY SDK] スコアAPI経由で送信完了:", finalScore);
-            } 
-            // 2. 汎用メッセージングAPIを利用する場合のフォールバック
-            else if (typeof window.AgentSDK.room?.sendMessage === 'function') {
-                // 1024バイトのパケット制限（Buffer Bloat現象）を防ぐための極小化ペイロード
-                const payload = { type: 'GAME_OVER', score: finalScore };
-                const msg = JSON.stringify(payload);
-                
-                // バイト数を計算し、確実に1KB未満である場合のみ送信する（防衛ライン）
-                const byteSize = new Blob([msg]).size;
-                if (byteSize < 1024) {
-                    window.AgentSDK.room.sendMessage({ message: msg });
-                    console.log("[GRAVITY SDK] メッセージAPI経由で送信完了:", finalScore);
-                } else {
-                    console.error("[GRAVITY SDK 致命的エラー] 送信データが1024バイトを超過しています。パケット詰まりを防止するため送信を遮断しました。");
-                }
-            }
+        // GRAVITYアプリ（親ウィンドウ/iframe外）が存在するかチェックし、postMessageで送信
+        if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: 'gameOver',
+                score: finalScore
+            }, '*');
+            console.log("[GRAVITY SDK] スコア送信完了 (postMessage):", finalScore);
         } else {
-            // PCブラウザやGitHub上での単体テスト時
-            console.info("[Local Test] AgentSDKが検出されませんでした。スコア送信をスキップします。 Final Score:", finalScore);
+            // PCブラウザやGitHub Pagesでの単体テスト時（iframe外で直接実行されている場合）
+            console.info("[Local Test] GRAVITY親ウィンドウが検出されませんでした。スコア送信をスキップします。 Final Score:", finalScore);
         }
     } catch (error) {
         console.warn("[GRAVITY SDK Error] スコア送信中に例外が発生しました:", error);
