@@ -3,19 +3,15 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
- * [Version 1.4]
- * - 修正内容: iOSのオーディオコンテキスト・ゾンビ化対策として、ミュート解除時に
- *   古いシンセサイザーを完全に破棄（dispose）し、ゼロから再構築するハードリセットを実装。
- * 
- * [Version 1.3]
- * - 修正内容: 初期状態をUIと合わせてミュート解除(isMuted=false)に変更。
- * - 修正内容: 再生時の過剰なブロック(return)を撤廃し、ターン操作(タップ)時にのみ
- *   Tone.start() を呼び出して安全にオーディオエンジンを叩き起こすシンプルで堅牢な設計に修正。
+ * [Version 1.5]
+ * - 修正内容: 初期状態を本来のミュート(isMuted=true)に戻し、UIとの矛盾を解消。
+ * - 修正内容: 画面がバックグラウンドから復帰したこと（visibilitychange）を自動検知し、
+ *   プレイヤーにボタン操作を強いることなく、自動的にハードリセットをかけて音を復活させる処理を追加。
  */
 
 // 音響エンジン（シンセサイザー群）と状態の保持
 const synths = {};
-let isMuted = false; // 初期状態をミュート解除（UIのアイコンと矛盾させない）
+let isMuted = true; // ★修正: 初期状態を本来の「ミュート（音なし）」に戻し、UIのXマークと完全に一致させる
 let isInitialized = false;
 
 /**
@@ -137,7 +133,6 @@ export function toggleMute() {
     
     // ミュート解除（ボタンのタップ時）に確実にエンジンを再構築する（ハードリセット）
     if (!isMuted) {
-        // ★修正点：ゾンビ化したコンテキスト対策として、古い楽器を完全に破棄して初期化フラグをリセット
         if (isInitialized) {
             for (let key in synths) {
                 if (synths[key] && typeof synths[key].dispose === 'function') {
@@ -158,4 +153,26 @@ export function toggleMute() {
  */
 export function getMuteState() {
     return isMuted;
+}
+
+/**
+ * ★追加：画面の表示状態（バックグラウンドからの復帰）を監視し、
+ * もしプレイヤーがミュートを解除して遊んでいた場合は、自動的にハードリセットをかけてゾンビ化を防ぐ
+ */
+if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !isMuted) {
+            // 画面に復帰した瞬間、古い楽器を破棄して初期化フラグをリセット
+            if (isInitialized) {
+                for (let key in synths) {
+                    if (synths[key] && typeof synths[key].dispose === 'function') {
+                        synths[key].dispose();
+                    }
+                }
+                isInitialized = false;
+            }
+            // 次のユーザー操作（Uターン等）に備えて新品の楽器を作り直す
+            initAudio();
+        }
+    });
 }
