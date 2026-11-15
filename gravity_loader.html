@@ -5,9 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>よけて！ハムスター (GRAVITY Loader)</title>
     
-    <!-- 【最重要】GRAVITYアプリ内でGitHub上のリソースを正しく参照するための絶対パス指定 -->
-    <base href="https://norion3.github.io/hamu/">
-    
     <!-- 外部ライブラリの読み込み -->
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -22,8 +19,8 @@
         // アプリの強固なキャッシュを回避しつつ、不要な通信帯域を節約します
         const cacheBuster = Math.floor(new Date().getTime() / 300000);
         
-        // GitHub上の main.js を動的にインポート（以降の処理はすべてJS側に委譲）
-        import(`./main.js?t=${cacheBuster}`).catch(err => {
+        // 【最重要】iOS WebKitのバグを回避するため、完全な絶対パスでメインロジックを直接呼び出す
+        import(`https://norion3.github.io/hamu/main.js?t=${cacheBuster}`).catch(err => {
             console.error("[GRAVITY Loader Error] main.js の読み込みに失敗しました:", err);
             // エラー時は画面を真っ黒にせず、原因を表示して自己診断可能にする
             document.body.innerHTML = `<div style="color:red; padding:20px;">[Loader Error] プログラムの読み込みに失敗しました。<br>${err.message}</div>`;
