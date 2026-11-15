@@ -3,11 +3,11 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
- * [Version 1.1]
- * - 修正内容: ミュート解除時（タップ時）にオーディオエンジンを確実に叩き起こす
- *   安全装置を追加。iOSでの音声ミュート復帰バグ（音が出ない現象）を修正。
- * - 修正内容: プレイ中のターン操作など、ユーザーのタップ起因で音が鳴る際にも
- *   フェイルセーフとしてエンジン再起動を試みるよう playSound を強化。
+ * [Version 1.2]
+ * - 修正内容: 画面復帰時の音消失（サスペンド）バグを完全修正。自動再生音（スコア等）での
+ *   無許可の起動を禁止し、iOSによるオーディオエンジンの永久凍結を防止。
+ * - 修正内容: ミュート解除時およびターン操作時に、明示的に `context.resume()` を呼び出し
+ *   安全かつ確実にエンジンを再起動（サスペンド解除）するロジックに変更。
  */
 
 // 音響エンジン（シンセサイザー群）と状態の保持
@@ -57,7 +57,7 @@ function setupSynths() {
     // 6. フィーバー突入音（ギュイーン）
     synths.fever = new Tone.PolySynth(Tone.Synth, { 
         oscillator: { type: 'sawtooth' }, 
-        envelope: { attack: 0.1, decay: 0.2, sustain: 0.5, release: 1 } 
+        envelope: { attack: 0.1, decay: 0.2, sustain: 0, release: 1 } 
     }).toDestination();
     synths.fever.volume.value = -12;
 
@@ -78,6 +78,7 @@ export async function initAudio() {
     try {
         if (Tone.context.state !== 'running') {
             await Tone.start();
+            await Tone.context.resume(); // ★念押しの明示的再起動（サスペンド解除）
         }
         setupSynths();
     } catch (e) {
@@ -92,10 +93,14 @@ export async function initAudio() {
 export function playSound(type) {
     if (!synths[type] || isMuted) return;
     
-    // ★修正点：iOS向け安全装置。万が一再生時にエンジンが寝ていれば、
-    // ユーザーのタップ起因（ターン操作時など）に乗じて叩き起こす
+    // ★修正点：自動発火する音（スコア等）で勝手にエンジンを起こすとiOSに永久凍結されるため、
+    // ユーザーが直接画面をタップした証拠である「turn」の時だけ再起動（resume）を許可する。
     if (Tone.context.state !== 'running') {
-        Tone.start().catch(e => console.warn(e));
+        if (type === 'turn') {
+            Tone.context.resume().catch(e => console.warn(e));
+        } else {
+            return; // エンジンが寝ている時の自動再生音はあえて無視する（永久凍結防止）
+        }
     }
     
     const now = Tone.now();
@@ -132,10 +137,13 @@ export function playSound(type) {
 export function toggleMute() {
     isMuted = !isMuted;
     
-    // ★修正点：ミュートを解除した（ボタンをタップした）瞬間のコンテキストを利用して、
-    // 確実にオーディオエンジンを起動（または再開）させる
+    // ★修正点：ミュート解除（ボタンのタップ時）に確実にエンジンを叩き起こす
     if (!isMuted) {
         initAudio(); 
+        // 確実にサスペンド状態を解除する
+        if (Tone.context.state !== 'running') {
+            Tone.context.resume().catch(e => console.warn(e));
+        }
     }
     
     return isMuted;
