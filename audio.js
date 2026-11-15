@@ -3,6 +3,11 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
+ * [Version 1.7]
+ * - 修正内容: toggleMute内での delete 漏れを修正し、破棄済みオブジェクトへの誤アクセスを防止。
+ * - 修正内容: playSound において、isMuted を最優先でチェックし不要なエンジン起動を抑止。
+ * - 修正内容: playSound の再生処理を try-catch で保護し、連打時の Tone.js タイムスタンプエラーによるフリーズを防止。
+ * 
  * [Version 1.6]
  * - 修正内容: iOSでのバックグラウンド復帰時のクラッシュ回避のため、visibilitychange内での
  *   強制的な initAudio() 呼び出しを削除。楽器の破棄とプロパティの消去のみを行い、
@@ -16,7 +21,7 @@
 
 // 音響エンジン（シンセサイザー群）と状態の保持
 const synths = {};
-let isMuted = true; // ★修正: 初期状態を本来の「ミュート（音なし）」に戻し、UIのXマークと完全に一致させる
+let isMuted = true; // 初期状態を本来の「ミュート（音なし）」に戻し、UIのXマークと完全に一致させる
 let isInitialized = false;
 
 /**
@@ -94,6 +99,9 @@ export async function initAudio() {
  * @param {string} type - 鳴らす音の種類 ('turn', 'hit', 'score', etc.)
  */
 export function playSound(type) {
+    // ★追加: ミュート時は不要なオーディオエンジンの起動や処理を一切行わない
+    if (isMuted) return;
+
     // ユーザーが画面をタップした証拠である「turn（Uターン）」の瞬間にだけ、
     // 未初期化なら初期化し、エンジンが寝ていれば叩き起こす（Tone.start）。
     if (type === 'turn') {
@@ -105,32 +113,38 @@ export function playSound(type) {
         }
     }
 
-    if (!synths[type] || isMuted) return;
+    if (!synths[type]) return;
     
     const now = Tone.now();
-    switch(type) {
-        case 'turn': 
-            synths.turn.triggerAttackRelease("C6", "32n", now); 
-            break;
-        case 'hit': 
-            synths.hit.triggerAttackRelease("C2", "8n", now); 
-            break;
-        case 'score': 
-            synths.score.triggerAttackRelease(["E5", "G5", "C6"], "32n", now); 
-            break;
-        case 'heal': 
-            synths.heal.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n", now); 
-            break;
-        case 'coin': 
-            synths.coin.triggerAttackRelease(["E6", "C7"], "32n", now); 
-            break;
-        case 'fever': 
-            synths.fever.triggerAttackRelease(["C5", "E5", "G5"], "4n", now); 
-            break;
-        case 'blast': 
-            synths.blast.triggerAttackRelease("16n", now); 
-            synths.coin.triggerAttackRelease(["C6", "E6"], "16n", now); 
-            break;
+    
+    // ★追加: 連打時のタイムスタンプ衝突エラー等でゲームループがクラッシュするのを防ぐ保護ブロック
+    try {
+        switch(type) {
+            case 'turn': 
+                synths.turn.triggerAttackRelease("C6", "32n", now); 
+                break;
+            case 'hit': 
+                synths.hit.triggerAttackRelease("C2", "8n", now); 
+                break;
+            case 'score': 
+                synths.score.triggerAttackRelease(["E5", "G5", "C6"], "32n", now); 
+                break;
+            case 'heal': 
+                synths.heal.triggerAttackRelease(["C5", "E5", "G5", "C6"], "8n", now); 
+                break;
+            case 'coin': 
+                synths.coin.triggerAttackRelease(["E6", "C7"], "32n", now); 
+                break;
+            case 'fever': 
+                synths.fever.triggerAttackRelease(["C5", "E5", "G5"], "4n", now); 
+                break;
+            case 'blast': 
+                synths.blast.triggerAttackRelease("16n", now); 
+                synths.coin.triggerAttackRelease(["C6", "E6"], "16n", now); 
+                break;
+        }
+    } catch (error) {
+        console.warn("[Audio] 再生エラーをスキップしました (連打保護):", error);
     }
 }
 
@@ -148,6 +162,8 @@ export function toggleMute() {
                 if (synths[key] && typeof synths[key].dispose === 'function') {
                     synths[key].dispose();
                 }
+                // ★追加: 破棄したオブジェクトのプロパティを確実に消去し、誤アクセスを防ぐ
+                delete synths[key];
             }
             isInitialized = false;
         }
@@ -166,7 +182,7 @@ export function getMuteState() {
 }
 
 /**
- * ★追加：画面の表示状態（バックグラウンドからの復帰）を監視し、
+ * 画面の表示状態（バックグラウンドからの復帰）を監視し、
  * もしプレイヤーがミュートを解除して遊んでいた場合は、破棄だけ行い、
  * ユーザーのタップを伴わない不要な initAudio の呼び出しを避ける
  */
@@ -183,7 +199,7 @@ if (typeof document !== 'undefined') {
                 }
                 isInitialized = false;
             }
-            // ★修正：ここでの initAudio() は非ユーザーアクションのため削除。
+            // ここでの initAudio() は非ユーザーアクションのため削除済。
             // 次のタップ操作（turn）時に自動的に再構築されます。
         }
     });
