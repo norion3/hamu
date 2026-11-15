@@ -3,6 +3,10 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
+ * [Version 1.4]
+ * - 修正内容: iOSのオーディオコンテキスト・ゾンビ化対策として、ミュート解除時に
+ *   古いシンセサイザーを完全に破棄（dispose）し、ゼロから再構築するハードリセットを実装。
+ * 
  * [Version 1.3]
  * - 修正内容: 初期状態をUIと合わせてミュート解除(isMuted=false)に変更。
  * - 修正内容: 再生時の過剰なブロック(return)を撤廃し、ターン操作(タップ)時にのみ
@@ -11,7 +15,7 @@
 
 // 音響エンジン（シンセサイザー群）と状態の保持
 const synths = {};
-let isMuted = false; // ★修正: 初期状態をミュート解除（UIのアイコンと矛盾させない）
+let isMuted = false; // 初期状態をミュート解除（UIのアイコンと矛盾させない）
 let isInitialized = false;
 
 /**
@@ -91,9 +95,8 @@ export async function initAudio() {
 export function playSound(type) {
     if (!synths[type] || isMuted) return;
     
-    // ★修正点: 過剰なブロックを廃止。ユーザーが画面をタップした証拠である
-    // 「turn（Uターン）」の瞬間にだけ、エンジンが寝ていれば叩き起こす（Tone.start）。
-    // それ以外の自動再生音は、ブロックせずにそのまま鳴らす指示を出す。
+    // ユーザーが画面をタップした証拠である「turn（Uターン）」の瞬間にだけ、
+    // エンジンが寝ていれば叩き起こす（Tone.start）。
     if (Tone.context.state !== 'running' && type === 'turn') {
         Tone.start().catch(e => console.warn(e));
     }
@@ -132,8 +135,18 @@ export function playSound(type) {
 export function toggleMute() {
     isMuted = !isMuted;
     
-    // ミュート解除（ボタンのタップ時）に確実にエンジンを叩き起こす
+    // ミュート解除（ボタンのタップ時）に確実にエンジンを再構築する（ハードリセット）
     if (!isMuted) {
+        // ★修正点：ゾンビ化したコンテキスト対策として、古い楽器を完全に破棄して初期化フラグをリセット
+        if (isInitialized) {
+            for (let key in synths) {
+                if (synths[key] && typeof synths[key].dispose === 'function') {
+                    synths[key].dispose();
+                }
+            }
+            isInitialized = false;
+        }
+        
         initAudio(); 
     }
     
