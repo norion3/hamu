@@ -3,6 +3,11 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
+ * [Version 1.8]
+ * - 修正内容: ミュート解除（オフ→オン）時に Tone.Context ごと新品へ差し替える完全ハードリセットを実装し、
+ *   iOSでのゾンビ化（AudioContext破損による無音）から確実に復旧できるように強化。
+ * - 修正内容: ミュート解除の初期化完了後に短い確認音を鳴らし、音の復活を即座に確認できるように改善。
+ * 
  * [Version 1.7]
  * - 修正内容: toggleMute内での delete 漏れを修正し、破棄済みオブジェクトへの誤アクセスを防止。
  * - 修正内容: playSound において、isMuted を最優先でチェックし不要なエンジン起動を抑止。
@@ -99,7 +104,7 @@ export async function initAudio() {
  * @param {string} type - 鳴らす音の種類 ('turn', 'hit', 'score', etc.)
  */
 export function playSound(type) {
-    // ★追加: ミュート時は不要なオーディオエンジンの起動や処理を一切行わない
+    // ミュート時は不要なオーディオエンジンの起動や処理を一切行わない
     if (isMuted) return;
 
     // ユーザーが画面をタップした証拠である「turn（Uターン）」の瞬間にだけ、
@@ -117,7 +122,7 @@ export function playSound(type) {
     
     const now = Tone.now();
     
-    // ★追加: 連打時のタイムスタンプ衝突エラー等でゲームループがクラッシュするのを防ぐ保護ブロック
+    // 連打時のタイムスタンプ衝突エラー等でゲームループがクラッシュするのを防ぐ保護ブロック
     try {
         switch(type) {
             case 'turn': 
@@ -155,20 +160,37 @@ export function playSound(type) {
 export function toggleMute() {
     isMuted = !isMuted;
     
-    // ミュート解除（ボタンのタップ時）に確実にエンジンを再構築する（ハードリセット）
+    // ミュート解除（ボタンのタップ時）にAudioContextごと新品へ差し替える完全ハードリセットを実行
     if (!isMuted) {
         if (isInitialized) {
             for (let key in synths) {
                 if (synths[key] && typeof synths[key].dispose === 'function') {
                     synths[key].dispose();
                 }
-                // ★追加: 破棄したオブジェクトのプロパティを確実に消去し、誤アクセスを防ぐ
+                // 破棄したオブジェクトのプロパティを確実に消去し、誤アクセスを防ぐ
                 delete synths[key];
             }
             isInitialized = false;
         }
         
-        initAudio(); 
+        // ★追加: iOSのAudioContextゾンビ化対策として、コンテキスト自体を新品に差し替える
+        try {
+            const oldContext = Tone.getContext();
+            const newContext = new Tone.Context();
+            Tone.setContext(newContext);
+            if (oldContext && typeof oldContext.dispose === 'function') {
+                oldContext.dispose();
+            }
+        } catch (e) {
+            console.warn('[Audio] Context reset skipped:', e);
+        }
+        
+        // エンジン起動・楽器再構築の完了後に短い確認音を鳴らす
+        initAudio().then(() => {
+            if (!isMuted) {
+                playSound('turn');
+            }
+        });
     }
     
     return isMuted;

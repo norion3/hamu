@@ -1,7 +1,7 @@
 /**
- * game.js
- * ゲームのコアロジック、物理演算、AIディレクター（スポーン制御）、
- * およびエンティティ（オブジェクト群）を管理するモジュール
+ * [Version 1.5]
+ * - 修正内容: レベルアップ時の確定回復アイテムが、スコアの同時加算によって
+ *   スキップされる不具合を修正（20の倍数判定から、奇数レベル到達時判定へ変更）。
  * 
  * [Version 1.4]
  * - 修正内容: フィーバー時（巨大化時）にアイテムの当たり判定が小さくなってしまうバグを修正。
@@ -287,8 +287,12 @@ export function updateGame() {
     // --- レベルアップ ＆ ボーナス生成 ---
     let newLevel = Math.floor(gameState.score / 10) + 1;
     if (newLevel > gameState.level) {
+        // ★修正: 「スコアが20の倍数か」の判定だと、19点→21点に飛んだ時に回復が出ないため、
+        // 「新レベルが奇数（3, 5, 7...）になった時」に確定で回復を出すよう仕様変更。
+        let shouldDropHeal = (newLevel % 2 !== 0 && newLevel > 1);
         gameState.level = newLevel; 
-        if (gameState.score % 20 === 0) {
+        
+        if (shouldDropHeal) {
             let obj = {
                 type: 'item', subType: 'normal', state: 'active', warningTimer: 0,
                 size: 20, vx: 0, vy: 2.0, x: Math.max(20, Math.min(W - 20, track.x + Math.random() * track.w)), y: -50, 
