@@ -194,8 +194,10 @@ export function initDOM(callbacks) {
     });
     resizeObserver.observe(canvasContainer);
 
-    // 初回リサイズを手動で発火
-    callbacks.onResize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+    // ★修正点：初回リサイズを手動で発火（main.js側での変数受け取りを待つため非同期化）
+    setTimeout(() => {
+        callbacks.onResize(canvasContainer.clientWidth, canvasContainer.clientHeight);
+    }, 0);
 
     return { canvas, ctx };
 }
