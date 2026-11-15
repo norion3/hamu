@@ -2,6 +2,11 @@
  * game.js
  * ゲームのコアロジック、物理演算、AIディレクター（スポーン制御）、
  * およびエンティティ（オブジェクト群）を管理するモジュール
+ * 
+ * [Version 1.2]
+ * - 修正内容: 落下位置（X座標）の偏りを解消。画面幅を100%フル活用するランダム（広域）と、
+ *   前回と逆側に落とす（ジグザグ誘導）確率を大幅に引き上げ、回避不能な壁ができにくい
+ *   フェアでアクション性の高いバランスに調整。
  */
 
 import { TIMERS, PHYSICS, EMOJIS } from './constants.js';
@@ -129,7 +134,7 @@ function spawnObject() {
         };
     }
 
-    // ★ 改善点：団子落下防止のための速度分散
+    // 団子落下防止のための速度分散
     function getVariedSpeed(base) {
         let sr = Math.random();
         if (sr < 0.50) return base;        
@@ -138,19 +143,30 @@ function spawnObject() {
     }
 
     const s10 = gameState.score % 10;
-    // スコア末尾 7, 8 はラッシュゾーン
     const isPanicZone = (gameState.score > 10 && (s10 === 7 || s10 === 8));
 
-    // ★ 改善点：真ん中安全地帯の解消（中央落下率を55%にアップ）
+    // ★ 修正点：フェアなランダム性と画面のフル活用
     function getSmartX(objSize) {
         let r = Math.random();
         let targetX;
         let centerX = track.x + track.w / 2;
         
-        if (!isPanicZone && r < 0.25) targetX = gameState.player.x + (Math.random() * 40 - 20);
-        else if (r < 0.80) targetX = centerX + (Math.random() * track.w * 0.45 - track.w * 0.225);
-        else targetX = (gameState.lastSpawnX < centerX) ? centerX + Math.random() * (track.w / 2) : track.x + Math.random() * (track.w / 2);
+        if (!isPanicZone && r < 0.20) {
+            // [20%] スナイプ：プレイヤーの少し前方に落としてUターンを誘発
+            targetX = gameState.player.x + (Math.random() * 60 - 30);
+        } 
+        else if (r < 0.60) {
+            // [40%] ジグザグ誘導：前回と「逆の半面」に落とし、理不尽な壁を防ぐ
+            targetX = (gameState.lastSpawnX < centerX) 
+                ? centerX + (Math.random() * (track.w / 2)) 
+                : track.x + (Math.random() * (track.w / 2));
+        } 
+        else {
+            // [40%] 広域ランダム：コース全体（左端から右端まで）を均等に使う
+            targetX = track.x + (Math.random() * track.w);
+        }
         
+        // 画面外にハミ出さないようにクリッピング
         targetX = Math.max(objSize, Math.min(W - objSize, targetX));
         gameState.lastSpawnX = targetX;
         return targetX;
@@ -174,7 +190,6 @@ function spawnObject() {
     let normals = [...EMOJIS.NORMAL];
     let giants = [], sides = [], upwards = [], diags = [], talls = [], stutters = [];
     
-    // ★ 改善点：レベルごとの段階的な解禁
     if (gameState.level >= 2) { giants = [...EMOJIS.GIANT]; talls = [...EMOJIS.TALL]; }
     if (gameState.level >= 3) { sides = [...EMOJIS.SIDE]; }
     if (gameState.level >= 4) { stutters = [...EMOJIS.STUTTER]; diags = [...EMOJIS.DIAGONAL]; }
@@ -187,7 +202,7 @@ function spawnObject() {
     const hasTallEnemy = gameState.objects.some(o => o.subType === 'tall');
     const hasStutterEnemy = gameState.objects.some(o => o.subType === 'stutter');
 
-    // ★ 改善点：特殊攻撃の同時出現禁止 ＆ ラッシュ中の上空限定化
+    // 特殊攻撃の同時出現禁止 ＆ ラッシュ中の上空限定化
     const canSpawnSpecial = !isPanicZone && !hasSideEnemy && !hasUpwardEnemy && !hasGiantEnemy && !hasTallEnemy;
 
     if (canSpawnSpecial && giants.length > 0 && gameState.giantCooldown <= 0 && r < 0.15) {
@@ -212,7 +227,7 @@ function spawnObject() {
         let targetY = Math.random() < 0.5 ? track.y : track.y + track.h;
         let obj = createObj('enemy', 'side', 0, targetY, 0, 0, 20, emj);
         obj.state = 'warning'; 
-        obj.warningTimer = TIMERS.WARNING_FRAMES; // ★延長された警告時間
+        obj.warningTimer = TIMERS.WARNING_FRAMES; // 延長された警告時間
         let fromLeft = Math.random() < 0.5;
         obj.x = fromLeft ? -50 : W + 50; 
         obj.vx = fromLeft ? baseSpeed * PHYSICS.SIDE_SPEED_MULT : -baseSpeed * PHYSICS.SIDE_SPEED_MULT;
@@ -235,7 +250,7 @@ function spawnObject() {
         // 通常落下 ＋ ラッシュ時はこれに限定される
         let obj = createObj('enemy', 'normal', getSmartX(20), -50, getVariedSpeed(baseSpeed), 0, 20, normals[Math.floor(Math.random() * normals.length)]);
         
-        // ★ 改善点：団子徹底防止（同じ位置・速度を監視）
+        // 団子徹底防止（同じ位置・速度を監視）
         for (let o of gameState.objects) {
             if (o.type === 'enemy' && o.subType === 'normal' && o.y < H * 0.6 && Math.abs(o.x - obj.x) < obj.size * 2.5) {
                 if (Math.abs(o.vy - obj.vy) < 0.8) obj.vy = (Math.random() < 0.5) ? obj.vy * 1.5 : obj.vy * 0.6;
@@ -299,7 +314,7 @@ export function updateGame() {
         const baseInterval = Math.max(24, 85 - (gameState.level * 4));
         let spawnInterval = baseInterval;
         
-        // ★ 改善点：ラッシュ時の間隔をマイルドに緩和し、確実な隙間を作る
+        // ラッシュ時の間隔をマイルドに緩和し、確実な隙間を作る
         if (isPanicZone) spawnInterval = Math.max(20, Math.floor(baseInterval * 0.45));
         else if (isRush) spawnInterval = Math.max(26, Math.floor(baseInterval * 0.6));
         
