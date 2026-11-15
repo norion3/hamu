@@ -3,6 +3,11 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
+ * [Version 1.9]
+ * - 修正内容: GRAVITYでゲームを閉じて「新規プレイ」した際などに起きるiOSのAudioContextゾンビ化対策として、
+ *   ユーザーの最初のタップ操作（playSoundのturn）時にも、確実にAudioContextを新品に差し替える
+ *   完全なハードリセットを実行し、無音状態を自己修復するよう強化。
+ * 
  * [Version 1.8]
  * - 修正内容: ミュート解除（オフ→オン）時に Tone.Context ごと新品へ差し替える完全ハードリセットを実装し、
  *   iOSでのゾンビ化（AudioContext破損による無音）から確実に復旧できるように強化。
@@ -100,6 +105,23 @@ export async function initAudio() {
 }
 
 /**
+ * 壊れたAudioContextごと新品へ差し替える完全ハードリセット処理
+ * iOS特有のゾンビ化対策として、ユーザー操作時に呼び出します。
+ */
+function forceResetAudioContext() {
+    try {
+        const oldContext = Tone.getContext();
+        const newContext = new Tone.Context();
+        Tone.setContext(newContext);
+        if (oldContext && typeof oldContext.dispose === 'function') {
+            oldContext.dispose();
+        }
+    } catch (e) {
+        console.warn('[Audio] Context reset skipped:', e);
+    }
+}
+
+/**
  * 効果音の再生
  * @param {string} type - 鳴らす音の種類 ('turn', 'hit', 'score', etc.)
  */
@@ -111,6 +133,9 @@ export function playSound(type) {
     // 未初期化なら初期化し、エンジンが寝ていれば叩き起こす（Tone.start）。
     if (type === 'turn') {
         if (!isInitialized) {
+            // ★追加: 復帰後など未初期化状態から初めてタップされた際、
+            // 壊れたコンテキストが残っている可能性が高いため、ここで強制的に新品へ差し替える（自動ハードリセット）
+            forceResetAudioContext();
             setupSynths();
         }
         if (Tone.context.state !== 'running') {
@@ -173,17 +198,8 @@ export function toggleMute() {
             isInitialized = false;
         }
         
-        // ★追加: iOSのAudioContextゾンビ化対策として、コンテキスト自体を新品に差し替える
-        try {
-            const oldContext = Tone.getContext();
-            const newContext = new Tone.Context();
-            Tone.setContext(newContext);
-            if (oldContext && typeof oldContext.dispose === 'function') {
-                oldContext.dispose();
-            }
-        } catch (e) {
-            console.warn('[Audio] Context reset skipped:', e);
-        }
+        // コンテキスト自体を新品に差し替える
+        forceResetAudioContext();
         
         // エンジン起動・楽器再構築の完了後に短い確認音を鳴らす
         initAudio().then(() => {
@@ -222,7 +238,7 @@ if (typeof document !== 'undefined') {
                 isInitialized = false;
             }
             // ここでの initAudio() は非ユーザーアクションのため削除済。
-            // 次のタップ操作（turn）時に自動的に再構築されます。
+            // 次のタップ操作（turn）時に自動的にハードリセットと再構築されます。
         }
     });
 }
