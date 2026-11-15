@@ -195,9 +195,9 @@ function loop() {
 }
 
 // --------------------------------------------------------
-// アプリケーションの初期起動
+// アプリケーションの初期起動シーケンス
 // --------------------------------------------------------
-window.addEventListener('DOMContentLoaded', () => {
+function boot() {
     // 1. DOM（UI）の動的構築とイベントバインド
     const dom = initDOM({
         onStart: async () => {
@@ -217,4 +217,11 @@ window.addEventListener('DOMContentLoaded', () => {
     
     // 2. メインループの起動
     requestAnimationFrame(loop);
-});
+}
+
+// GRAVITYでの動的インポートによる「すれ違い（すでにロード完了している状態）」を防ぐ安全な起動
+if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', boot);
+} else {
+    boot(); // すでにHTMLの読み込みが終わっていれば、待たずに即座に起動
+}
