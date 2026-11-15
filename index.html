@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>よけて！ハムスター</title>
+    
+    <!-- 外部ライブラリの読み込み -->
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;900&family=M+PLUS+Rounded+1c:wght@700;900&display=swap" rel="stylesheet">
+    
+    <!-- メインロジックの動的読み込み (キャッシュ回避) -->
+    <script type="module">
+        // 現在時刻をミリ秒で取得し、キャッシュバスターとして付与
+        const timestamp = new Date().getTime();
+        
+        // main.js を動的にインポート（UIの構築やゲームループはすべてJS側で行われます）
+        import(\`./main.js?t=\${timestamp}\`).catch(err => {
+            console.error("[Loader Error] main.js の読み込みに失敗しました:", err);
+        });
+    </script>
+</head>
+<!-- DOM（UI要素）は main.js 経由で dom.js によって自動的に body へ注入されます -->
+<body></body>
+</html>
