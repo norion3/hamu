@@ -2,10 +2,9 @@
  * main.js
  * ゲームのメインループ、描画レンダリング、および各モジュールの統合を担う心臓部
  * 
- * [Version 1.1]
- * - 修正内容: 描画負荷軽減（パフォーマンス最適化）のため、毎フレーム実行されていた
- *   トラック（足跡）と影(shadowBlur)の描画をオフスクリーンCanvasにキャッシュする仕組みを追加。
- *   これにより、低スペックな古いiPhone等でのバッテリー消費とカクつき（処理落ち）を防止。
+ * [Version 1.2]
+ * - 修正内容: アイテムの描画時、⭐(スター)以外は回転させないようにし、⏫⏬等の視認性を確保。
+ * - 修正内容: 警告(⚠️)表示時、敵が突進してくる方向を矢印(➡, ⬅, ⬆)で視覚的にサポート。
  */
 
 import { EMOJI_FONT, BG_PALETTES } from './constants.js';
@@ -146,8 +145,16 @@ function render() {
         if (obj.state === 'warning') {
             if (gameState.frames % 10 < 5) {
                 ctx.save(); ctx.font = `30px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';
-                if (obj.subType === 'upward') ctx.fillText('⚠️', obj.x, gameState.H - 18);
-                else ctx.fillText('⚠️', obj.vx > 0 ? 22 : gameState.W - 22, obj.y);
+                
+                // ★修正：突進してくる方向を矢印でサポート
+                if (obj.subType === 'upward') {
+                    ctx.fillText('⬆⚠️', obj.x, gameState.H - 18);
+                } else if (obj.vx > 0) {
+                    ctx.fillText('⚠️➡', 35, obj.y); // 左から右へ来る
+                } else {
+                    ctx.fillText('⬅⚠️', gameState.W - 35, obj.y); // 右から左へ来る
+                }
+                
                 ctx.restore();
             }
             continue; 
@@ -163,10 +170,14 @@ function render() {
             ctx.beginPath(); ctx.arc(0, 0, obj.size * 1.5, 0, Math.PI * 2);
             if(obj.itemType === 'star') {
                 ctx.fillStyle = `hsla(${(gameState.frames * 10) % 360}, 100%, 70%, 0.5)`; ctx.lineWidth = 3; ctx.strokeStyle = '#ffffff';
+                ctx.fill(); ctx.stroke(); 
+                // ★修正：星だけ回転させる
+                ctx.rotate(gameState.frames * 0.05);
             } else {
                 ctx.fillStyle = 'rgba(255, 215, 0, 0.4)'; ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
+                ctx.fill(); ctx.stroke(); 
+                // ★修正：星以外のアイテム（⏫, ⏬, ❤️）は回転させない
             }
-            ctx.fill(); ctx.stroke(); ctx.rotate(gameState.frames * 0.05);
         }
 
         ctx.font = `${obj.size * 2}px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';

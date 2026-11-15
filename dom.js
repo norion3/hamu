@@ -3,17 +3,15 @@
  * 画面UI（HTML/Tailwind）の動的インジェクト、イベントバインド、
  * およびiOS（WebKit）特有のスクロール・ラバーバンド防衛を行うモジュール
  * 
+ * [Version 1.3]
+ * - 修正内容: スタート画面とゲームオーバー画面のモーダル位置を、縦長スマホでも
+ *   親指が届きやすいように画面中央から下部寄り（justify-end と pb-[12vh]）へ動的に配置するよう調整。
+ * 
  * [Version 1.2]
  * - 修正内容: 画面上下のグレーの空白を消すため、gameContainerの `max-h-[850px]` 制限を撤廃。
  * - 修正内容: GRAVITYヘッダーギリギリにスコアを配置するため、上部余白を 60px から 44px へ引き上げ。
  * - 修正内容: 下部コントローラーの間延びを防ぐため、余分なパディング(+12px)を削除し、
  *   純粋な `env(safe-area-inset-bottom)` のみでスマートに配置。
- * 
- * [Version 1.1]
- * - 修正内容: GRAVITY上部ヘッダーとのUI被り防止のため、HUD(スコア/ライフ)を
- *   env(safe-area-inset-top) + 60px 下方へオフセット。
- * - 修正内容: iPhone下部のホームインジケーター（ホームバー）との干渉を防ぐため、
- *   コントローラー下部に env(safe-area-inset-bottom) の動的余白を追加。
  */
 
 /**
@@ -76,8 +74,9 @@ function injectDOM() {
             <canvas id="gameCanvas" class="block w-full h-full"></canvas>
 
             <!-- スタート画面 (GRAVITY最適化: backdrop-blurを廃止) -->
-            <div id="startScreen" class="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-30 transition-opacity duration-300">
-                <div class="bg-white/95 rounded-3xl p-8 mb-8 text-center shadow-2xl border-4 border-sky-100 w-10/12 max-w-sm">
+            <!-- ★修正：justify-end と pb-[12vh] で画面サイズに応じて親指の届く下部寄りに配置 -->
+            <div id="startScreen" class="absolute inset-0 bg-black/60 flex flex-col items-center justify-end pb-[12vh] z-30 transition-opacity duration-300">
+                <div class="bg-white/95 rounded-3xl p-8 text-center shadow-2xl border-4 border-sky-100 w-10/12 max-w-sm">
                     <div class="text-gray-700 font-black text-xl leading-relaxed mb-8 whitespace-pre-line">タップで Uターン
 障害物を 避けよう！</div>
                     <button id="startBtn" class="w-full bg-blue-500 hover:bg-blue-400 text-white font-black py-4 px-8 rounded-full text-2xl shadow-[0_6px_0_#1e40af] active:shadow-[0_0px_0_#1e40af] active:translate-y-[6px] transition-all">
@@ -87,7 +86,8 @@ function injectDOM() {
             </div>
 
             <!-- ゲームオーバー画面 (GRAVITY最適化: backdrop-blurを廃止) -->
-            <div id="gameOverScreen" class="absolute inset-0 bg-black/75 flex flex-col items-center justify-center z-30 hidden">
+            <!-- ★修正：スタート画面と同様に下部寄りへ配置 -->
+            <div id="gameOverScreen" class="absolute inset-0 bg-black/75 flex flex-col items-center justify-end pb-[12vh] z-30 hidden">
                 <h2 class="text-5xl font-black text-red-400 mb-6 drop-shadow-[0_0_10px_rgba(248,113,113,0.8)] tracking-widest">
                     GAME OVER
                 </h2>
