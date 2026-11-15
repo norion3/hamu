@@ -3,10 +3,10 @@
  * ゲームのコアロジック、物理演算、AIディレクター（スポーン制御）、
  * およびエンティティ（オブジェクト群）を管理するモジュール
  * 
- * [Version 1.2]
- * - 修正内容: 落下位置（X座標）の偏りを解消。画面幅を100%フル活用するランダム（広域）と、
- *   前回と逆側に落とす（ジグザグ誘導）確率を大幅に引き上げ、回避不能な壁ができにくい
- *   フェアでアクション性の高いバランスに調整。
+ * [Version 1.3]
+ * - 修正内容: 当たり判定の分離（敵は小さく、アイテムは大きく、フィーバー時は巨大化）。
+ * - 修正内容: レベルアップ直後（スコア下1桁 9, 0, 1）にアクティブレスト（休憩ゾーン）を導入。
+ * - 修正内容: スコアに応じた移動スピード成長、及び ⏫⏬ アイテムによるバフ/デバフ管理を実装。
  */
 
 import { TIMERS, PHYSICS, EMOJIS } from './constants.js';
@@ -20,16 +20,17 @@ export const gameState = {
     W: 0, H: 0,
     score: 0, level: 1, lives: 3, frames: 0,
     intervalFrames: 0, giantCooldown: 0, lastSpawnX: 0,
-    triggerShake: false, // 被弾時の画面揺れフラグ
+    triggerShake: false, // 被弾時・フィーバー撃破時の画面揺れフラグ
     
     // トラック（走行ルート）情報
     track: { x: 0, y: 0, w: 0, h: 0, perimeter: 0 },
     
     // プレイヤー（ハムスター）
     player: { 
-        pos: 0, size: PHYSICS.PLAYER_SIZE, speed: PHYSICS.PLAYER_BASE_SPEED, 
+        pos: 0, size: PHYSICS.PLAYER_SIZE, speed: PHYSICS.PLAYER_START_SPEED, 
         dir: 1, emoji: '🐹', invincible: 0, feverFrames: 0, 
-        facingRight: true, x: 0, y: 0 
+        facingRight: true, x: 0, y: 0,
+        speedBuff: 0, buffFrames: 0 // ⏫⏬アイテムによるバフ管理
     },
     
     // 画面上のエンティティ群
@@ -85,6 +86,8 @@ export function initGame(W, H) {
     gameState.player.dir = 1;
     gameState.player.feverFrames = 0;
     gameState.player.invincible = 60;
+    gameState.player.speedBuff = 0;
+    gameState.player.buffFrames = 0;
     
     // 背景パーティクルの初期化
     gameState.particles = Array.from({length: 30}, () => new BackgroundParticle());
@@ -138,35 +141,33 @@ function spawnObject() {
     function getVariedSpeed(base) {
         let sr = Math.random();
         if (sr < 0.50) return base;        
-        if (sr < 0.80) return base * 1.5; // スピード差を広げて一瞬で交差させる
+        if (sr < 0.80) return base * 1.5; 
         return base * 0.6;                
     }
 
     const s10 = gameState.score % 10;
     const isPanicZone = (gameState.score > 10 && (s10 === 7 || s10 === 8));
+    
+    // ★追加: アクティブレスト（休憩ゾーン）
+    // 猛攻の直後やレベルアップ直後は、プレイヤーに息をつかせる
+    const isRestZone = (gameState.score > 0 && (s10 === 9 || s10 === 0 || s10 === 1));
 
-    // ★ 修正点：フェアなランダム性と画面のフル活用
+    // フェアなランダム性と画面のフル活用
     function getSmartX(objSize) {
         let r = Math.random();
         let targetX;
         let centerX = track.x + track.w / 2;
         
         if (!isPanicZone && r < 0.20) {
-            // [20%] スナイプ：プレイヤーの少し前方に落としてUターンを誘発
             targetX = gameState.player.x + (Math.random() * 60 - 30);
-        } 
-        else if (r < 0.60) {
-            // [40%] ジグザグ誘導：前回と「逆の半面」に落とし、理不尽な壁を防ぐ
+        } else if (r < 0.60) {
             targetX = (gameState.lastSpawnX < centerX) 
                 ? centerX + (Math.random() * (track.w / 2)) 
                 : track.x + (Math.random() * (track.w / 2));
-        } 
-        else {
-            // [40%] 広域ランダム：コース全体（左端から右端まで）を均等に使う
+        } else {
             targetX = track.x + (Math.random() * track.w);
         }
         
-        // 画面外にハミ出さないようにクリッピング
         targetX = Math.max(objSize, Math.min(W - objSize, targetX));
         gameState.lastSpawnX = targetX;
         return targetX;
@@ -174,14 +175,29 @@ function spawnObject() {
 
     // --- アイテム生成 ---
     if (isItem) {
-        let obj = createObj('item', 'normal', 0, -50, baseSpeed * 0.6, 0, 20, '');
-        if (gameState.player.feverFrames === 0 && Math.random() < 0.1) {
-            obj.itemType = 'star'; obj.emoji = EMOJIS.ITEMS.STAR;
+        // ★修正: スピードアイテムの同時ドロップ判定（30%の確率でスピードアイテム抽選）
+        if (gameState.level >= 2 && Math.random() < 0.3) {
+            let leftX = track.x + (track.w * 0.25);
+            let rightX = track.x + (track.w * 0.75);
+            
+            let objUp = createObj('item', 'normal', leftX, -50, baseSpeed * 0.6, 0, 20, EMOJIS.ITEMS.SPEED_UP);
+            objUp.itemType = 'speed_up';
+            gameState.objects.push(objUp);
+            
+            let objDown = createObj('item', 'normal', rightX, -50, baseSpeed * 0.6, 0, 20, EMOJIS.ITEMS.SPEED_DOWN);
+            objDown.itemType = 'speed_down';
+            gameState.objects.push(objDown);
         } else {
-            obj.itemType = 'heal'; obj.emoji = EMOJIS.ITEMS.HEAL;
+            // 通常アイテム（回復・星）
+            let obj = createObj('item', 'normal', 0, -50, baseSpeed * 0.6, 0, 20, '');
+            if (gameState.player.feverFrames === 0 && Math.random() < 0.1) {
+                obj.itemType = 'star'; obj.emoji = EMOJIS.ITEMS.STAR;
+            } else {
+                obj.itemType = 'heal'; obj.emoji = EMOJIS.ITEMS.HEAL;
+            }
+            obj.x = getSmartX(obj.size);
+            gameState.objects.push(obj);
         }
-        obj.x = getSmartX(obj.size);
-        gameState.objects.push(obj);
         return;
     }
 
@@ -195,15 +211,14 @@ function spawnObject() {
     if (gameState.level >= 4) { stutters = [...EMOJIS.STUTTER]; diags = [...EMOJIS.DIAGONAL]; }
     if (gameState.level >= 5) { upwards = [...EMOJIS.UPWARD]; }
 
-    // 現在の画面内の特殊敵をカウント
     const hasSideEnemy = gameState.objects.some(o => o.subType === 'side');
     const hasUpwardEnemy = gameState.objects.some(o => o.subType === 'upward');
     const hasGiantEnemy = gameState.objects.some(o => o.subType === 'giant');
     const hasTallEnemy = gameState.objects.some(o => o.subType === 'tall');
     const hasStutterEnemy = gameState.objects.some(o => o.subType === 'stutter');
 
-    // 特殊攻撃の同時出現禁止 ＆ ラッシュ中の上空限定化
-    const canSpawnSpecial = !isPanicZone && !hasSideEnemy && !hasUpwardEnemy && !hasGiantEnemy && !hasTallEnemy;
+    // ★修正: アクティブレスト中（isRestZone）は、特殊攻撃を一切スポーンさせない
+    const canSpawnSpecial = !isPanicZone && !isRestZone && !hasSideEnemy && !hasUpwardEnemy && !hasGiantEnemy && !hasTallEnemy;
 
     if (canSpawnSpecial && giants.length > 0 && gameState.giantCooldown <= 0 && r < 0.15) {
         let emj = giants[Math.floor(Math.random() * giants.length)];
@@ -227,7 +242,7 @@ function spawnObject() {
         let targetY = Math.random() < 0.5 ? track.y : track.y + track.h;
         let obj = createObj('enemy', 'side', 0, targetY, 0, 0, 20, emj);
         obj.state = 'warning'; 
-        obj.warningTimer = TIMERS.WARNING_FRAMES; // 延長された警告時間
+        obj.warningTimer = TIMERS.WARNING_FRAMES; 
         let fromLeft = Math.random() < 0.5;
         obj.x = fromLeft ? -50 : W + 50; 
         obj.vx = fromLeft ? baseSpeed * PHYSICS.SIDE_SPEED_MULT : -baseSpeed * PHYSICS.SIDE_SPEED_MULT;
@@ -241,16 +256,15 @@ function spawnObject() {
         obj.warningTimer = TIMERS.WARNING_FRAMES; 
         gameState.objects.push(obj);
     }
-    else if (!isPanicZone && diags.length > 0 && r < 0.80) {
+    else if (!isPanicZone && !isRestZone && diags.length > 0 && r < 0.80) {
         let obj = createObj('enemy', 'diagonal', getSmartX(20), -50, baseSpeed * PHYSICS.DIAGONAL_SPEED_MULT, 0, 20, diags[Math.floor(Math.random() * diags.length)]);
         obj.vx = (Math.random() > 0.5 ? 1 : -1) * (baseSpeed * 0.5); 
         gameState.objects.push(obj);
     } 
     else {
-        // 通常落下 ＋ ラッシュ時はこれに限定される
+        // 通常落下 
         let obj = createObj('enemy', 'normal', getSmartX(20), -50, getVariedSpeed(baseSpeed), 0, 20, normals[Math.floor(Math.random() * normals.length)]);
         
-        // 団子徹底防止（同じ位置・速度を監視）
         for (let o of gameState.objects) {
             if (o.type === 'enemy' && o.subType === 'normal' && o.y < H * 0.6 && Math.abs(o.x - obj.x) < obj.size * 2.5) {
                 if (Math.abs(o.vy - obj.vy) < 0.8) obj.vy = (Math.random() < 0.5) ? obj.vy * 1.5 : obj.vy * 0.6;
@@ -293,6 +307,16 @@ export function updateGame() {
     if (player.invincible > 0) player.invincible--;
     if (player.feverFrames > 0) player.feverFrames--;
     if (gameState.giantCooldown > 0) gameState.giantCooldown--;
+    
+    // ★追加: スピードバフのタイマー管理
+    if (player.buffFrames > 0) {
+        player.buffFrames--;
+        if (player.buffFrames <= 0) player.speedBuff = 0; // タイマー切れでバフリセット
+    }
+
+    // ★追加: 最終スピードの計算（ベース成長 + バフ補正）
+    let baseGrowthSpeed = Math.min(PHYSICS.PLAYER_MAX_SPEED, PHYSICS.PLAYER_START_SPEED + (gameState.score * PHYSICS.PLAYER_SPEED_GROWTH));
+    player.speed = baseGrowthSpeed + player.speedBuff;
 
     player.pos = (player.pos + player.dir * (player.speed * (player.feverFrames > 0 ? 1.5 : 1.0))) % track.perimeter;
     if (player.pos < 0) player.pos += track.perimeter;
@@ -310,12 +334,14 @@ export function updateGame() {
         const s10 = gameState.score % 10;
         const isRush = (s10 >= 5 && s10 <= 6);
         const isPanicZone = (gameState.score > 10 && (s10 === 7 || s10 === 8)); 
+        const isRestZone = (gameState.score > 0 && (s10 === 9 || s10 === 0 || s10 === 1)); 
         
         const baseInterval = Math.max(24, 85 - (gameState.level * 4));
         let spawnInterval = baseInterval;
         
-        // ラッシュ時の間隔をマイルドに緩和し、確実な隙間を作る
-        if (isPanicZone) spawnInterval = Math.max(20, Math.floor(baseInterval * 0.45));
+        // 波（ウェーブ）の調整
+        if (isRestZone) spawnInterval = Math.floor(baseInterval * 1.5); // ★休憩ゾーン：間隔を伸ばす
+        else if (isPanicZone) spawnInterval = Math.max(20, Math.floor(baseInterval * 0.45));
         else if (isRush) spawnInterval = Math.max(26, Math.floor(baseInterval * 0.6));
         
         if (gameState.frames % spawnInterval === 0) spawnObject();
@@ -325,14 +351,12 @@ export function updateGame() {
     for (let i = objects.length - 1; i >= 0; i--) {
         let obj = objects[i];
         
-        // 警告フェーズ
         if (obj.state === 'warning') {
             obj.warningTimer--;
             if (obj.warningTimer <= 0) obj.state = 'active';
             continue; 
         }
 
-        // 移動更新
         if (obj.subType === 'stutter') {
             if (!obj.hasStopped && obj.y >= obj.stopY) {
                 obj.stopTimer--;
@@ -353,11 +377,19 @@ export function updateGame() {
             }
         }
         
-        // --- 衝突判定 ---
-        let hitRadius = (player.size + obj.size) * (player.feverFrames > 0 ? 1.0 : 0.75);
+        // --- 衝突判定（★追加: 完全分離ロジック） ---
+        let hitRadius;
+        if (obj.type === 'item') {
+            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_ITEM; // 吸い取りやすく
+        } else if (player.feverFrames > 0) {
+            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_FEVER; // 巨大化なぎ倒し
+        } else {
+            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_ENEMY; // 極小化（ニアミス許容）
+        }
+        
         let isHit = false;
-
         let drawX = obj.x, drawY = obj.y;
+        
         if (obj.subType === 'tall') {
             let halfH = (((obj.segments || 4) - 1) * obj.size * 1.45) / 2;
             let dx = Math.abs(player.x - drawX), dy = Math.abs(player.y - Math.max(drawY - halfH, Math.min(drawY + halfH, player.y)));
@@ -372,12 +404,17 @@ export function updateGame() {
                     gameState.score += 1; 
                     texts.push(new FloatingText("+1", obj.x, drawY, "#2563eb", 24)); 
                     playSound('blast'); 
+                    gameState.triggerShake = true; // ★追加: フィーバー撃破時も揺らして爽快感UP
                 } else if (player.invincible === 0) {
                     gameState.lives--; 
                     playSound('hit'); 
                     gameState.triggerShake = true;
                     if (gameState.lives <= 0) gameState.status = 'GAMEOVER';
                     else player.invincible = TIMERS.INVINCIBLE_FRAMES;
+                    
+                    // 被弾時はバフを強制リセットしてペナルティ
+                    player.speedBuff = 0; 
+                    player.buffFrames = 0;
                 }
             } else if (obj.type === 'item') {
                 if (obj.itemType === 'heal') { 
@@ -388,6 +425,19 @@ export function updateGame() {
                 else if (obj.itemType === 'star') { 
                     player.feverFrames = TIMERS.FEVER_FRAMES; 
                     playSound('fever'); 
+                }
+                // ★追加: スピードアイテムの効果適用
+                else if (obj.itemType === 'speed_up') {
+                    player.speedBuff = PHYSICS.PLAYER_SPEED_UP_BUFF;
+                    player.buffFrames = TIMERS.BUFF_FRAMES;
+                    texts.push(new FloatingText("SPEED UP!", obj.x, drawY - 20, "#eab308"));
+                    playSound('coin');
+                }
+                else if (obj.itemType === 'speed_down') {
+                    player.speedBuff = PHYSICS.PLAYER_SPEED_DOWN_BUFF;
+                    player.buffFrames = TIMERS.BUFF_FRAMES;
+                    texts.push(new FloatingText("SLOW...", obj.x, drawY - 20, "#3b82f6"));
+                    playSound('coin');
                 }
             }
             objects.splice(i, 1); 
