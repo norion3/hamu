@@ -3,6 +3,12 @@
  * 画面UI（HTML/Tailwind）の動的インジェクト、イベントバインド、
  * およびiOS（WebKit）特有のスクロール・ラバーバンド防衛を行うモジュール
  * 
+ * [Version 1.2]
+ * - 修正内容: 画面上下のグレーの空白を消すため、gameContainerの `max-h-[850px]` 制限を撤廃。
+ * - 修正内容: GRAVITYヘッダーギリギリにスコアを配置するため、上部余白を 60px から 44px へ引き上げ。
+ * - 修正内容: 下部コントローラーの間延びを防ぐため、余分なパディング(+12px)を削除し、
+ *   純粋な `env(safe-area-inset-bottom)` のみでスマートに配置。
+ * 
  * [Version 1.1]
  * - 修正内容: GRAVITY上部ヘッダーとのUI被り防止のため、HUD(スコア/ライフ)を
  *   env(safe-area-inset-top) + 60px 下方へオフセット。
@@ -51,11 +57,12 @@ function injectDOM() {
     document.body.className = "flex items-center justify-center h-screen w-screen overflow-hidden bg-gray-200";
 
     const gameHTML = `
-    <div id="gameContainer" class="relative w-full max-w-md h-full max-h-[850px] bg-white shadow-2xl flex flex-col overflow-hidden">
+    <!-- ★修正：max-h-[850px] を撤廃し、どんな縦長スマホでもフル画面を使用する -->
+    <div id="gameContainer" class="relative w-full max-w-md h-full bg-white shadow-2xl flex flex-col overflow-hidden">
         
         <div id="canvasContainer" class="relative flex-1 overflow-hidden bg-gradient-to-b from-sky-200 to-green-100 cursor-pointer">
-            <!-- ★修正：top-4 を OSセーフエリア + GRAVITYヘッダー分(60px) に変更 -->
-            <div class="absolute top-[calc(env(safe-area-inset-top,0px)+60px)] left-0 right-0 w-full pointer-events-none z-10">
+            <!-- ★修正：topの余白を 60px から 44px へ減らし、GRAVITYヘッダーの真下にギリギリ配置する -->
+            <div class="absolute top-[calc(env(safe-area-inset-top,0px)+44px)] left-0 right-0 w-full pointer-events-none z-10">
                 <div class="absolute top-0 left-1/2 -translate-x-1/2 text-center text-gray-800 font-black drop-shadow-md">
                     SCORE<br>
                     <span id="scoreDisplay" class="text-7xl text-blue-600 leading-none">0</span>
@@ -95,8 +102,8 @@ function injectDOM() {
         </div>
 
         <!-- コントローラー -->
-        <!-- ★修正：固定高(h-24)から最小高(min-h-[6rem])に変更し、下部にホームバー用の余白(safe-area-inset-bottom)を追加 -->
-        <div class="bg-emerald-600 border-t-8 border-emerald-800 pt-3 px-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] min-h-[6rem] shrink-0 flex items-center justify-center gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.15)] z-20 relative w-full">
+        <!-- ★修正：下部の余白(+12px)を削除し、純粋な safe-area-inset-bottom のみに最適化 -->
+        <div class="bg-emerald-600 border-t-8 border-emerald-800 pt-3 px-3 pb-[env(safe-area-inset-bottom,0px)] min-h-[6rem] shrink-0 flex items-center justify-center gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.15)] z-20 relative w-full">
             <button id="muteBtn" class="h-full aspect-square bg-emerald-500 hover:bg-emerald-400 text-emerald-950 rounded-2xl shadow-[0_6px_0_#047857] active:shadow-[0_0px_0_#047857] active:translate-y-[6px] transition-all flex items-center justify-center border-4 border-emerald-300 shrink-0 text-emerald-900">
                 <svg id="muteIconOff" class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
                 <svg id="muteIconOn" class="w-8 h-8 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
