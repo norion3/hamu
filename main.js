@@ -2,6 +2,11 @@
  * main.js
  * ゲームのメインループ、描画レンダリング、および各モジュールの統合を担う心臓部
  * 
+ * [Version 1.4]
+ * - 修正内容: iOS WebKit特有の結合絵文字（❤️等）のセンタリングズレを完全に解消するため、
+ *   オフスクリーンCanvasとgetImageDataを用いた「ピクセル実測・自動センタリングキャッシュ」を導入し、
+ *   プレイヤー・敵・アイテムをdrawImageで真の中央に描画するよう変更。
+ * 
  * [Version 1.3]
  * - 修正内容: マルチデバイス（横幅の異なるiPhone等）対応のため、画面幅に応じた動的スケーリングと
  *   アイテム周囲のエフェクト円、および絵文字の描画座標（ベースライン）を完全に同期・補正するロジックを追加。
@@ -22,6 +27,91 @@ let canvas, ctx;
 // --- オフスクリーンCanvasの準備（足跡描画のキャッシュ用） ---
 const trackCanvas = document.createElement('canvas');
 const trackCtx = trackCanvas.getContext('2d');
+
+// --- 絵文字のピクセル実測・自動センタリングキャッシュ ---
+const emojiCache = new Map();
+
+/**
+ * 絵文字をオフスクリーンCanvasに一度描画し、実際に色のあるピクセル領域を実測して
+ * 真の視覚的中心がど真ん中に来るキャッシュ画像（スタンプ）を生成して返す
+ */
+function getCenteredEmojiCanvas(emoji) {
+    if (emojiCache.has(emoji)) {
+        return emojiCache.get(emoji);
+    }
+
+    const scanSize = 192;
+    const fontSize = 96;
+    const outSize = 128;
+
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = scanSize;
+    tmpCanvas.height = scanSize;
+    const tmpCtx = tmpCanvas.getContext('2d', { willReadFrequently: true });
+
+    // iOSのtextAlign='center'バグを回避するため、左上基準で余白を持って描画する
+    tmpCtx.font = `${fontSize}px ${EMOJI_FONT}`;
+    tmpCtx.textAlign = 'left';
+    tmpCtx.textBaseline = 'top';
+    tmpCtx.fillStyle = '#000000';
+    tmpCtx.fillText(emoji, 32, 32);
+
+    const imgData = tmpCtx.getImageData(0, 0, scanSize, scanSize).data;
+    let minX = scanSize, maxX = -1, minY = scanSize, maxY = -1;
+
+    for (let y = 0; y < scanSize; y++) {
+        for (let x = 0; x < scanSize; x++) {
+            const alpha = imgData[(y * scanSize + x) * 4 + 3];
+            if (alpha > 10) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = outSize;
+    outCanvas.height = outSize;
+    const outCtx = outCanvas.getContext('2d');
+
+    if (maxX >= minX && maxY >= minY) {
+        const bw = maxX - minX + 1;
+        const bh = maxY - minY + 1;
+        // 細長い絵文字が過剰に拡大されないよう基準サイズとの最大値でスケールを決定
+        const maxDim = Math.max(bw, bh, fontSize * 0.85);
+        const scale = (outSize * 0.88) / maxDim;
+        const drawW = bw * scale;
+        const drawH = bh * scale;
+
+        outCtx.drawImage(
+            tmpCanvas,
+            minX, minY, bw, bh,
+            (outSize - drawW) / 2,
+            (outSize - drawH) / 2,
+            drawW, drawH
+        );
+    } else {
+        // 万が一ピクセルが検出できなかった場合のフォールバック
+        outCtx.font = `${fontSize}px ${EMOJI_FONT}`;
+        outCtx.textAlign = 'center';
+        outCtx.textBaseline = 'middle';
+        outCtx.fillText(emoji, outSize / 2, outSize / 2);
+    }
+
+    emojiCache.set(emoji, outCanvas);
+    return outCanvas;
+}
+
+/**
+ * キャッシュされた絵文字を指定座標の中心(x, y)へ正確に描画する
+ */
+function drawCenteredEmoji(targetCtx, emoji, x, y, size) {
+    const cached = getCenteredEmojiCanvas(emoji);
+    const drawSize = size * 2.2;
+    targetCtx.drawImage(cached, x - drawSize / 2, y - drawSize / 2, drawSize, drawSize);
+}
 
 /**
  * トラック（足跡）の静止画像を生成してキャッシュする
@@ -133,18 +223,14 @@ function render() {
     const player = gameState.player;
     if (player.invincible === 0 || player.invincible % 10 < 5 || player.feverFrames > 0) {
         ctx.save(); ctx.translate(player.x, player.y);
-        
-        // プレイヤー自身のオフセット補正
-        let playerOffsetY = player.size * 0.12;
-        
         if (player.feverFrames > 0) {
             ctx.beginPath(); ctx.arc(0, 0, player.size * 1.5, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 255, 200, 0.4)`; ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255, 215, 0, 0.8)`;
             ctx.fill(); ctx.stroke();
         }
-        ctx.font = `${player.size * 2}px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';
         if (!player.facingRight) ctx.scale(-1, 1);
-        ctx.fillText(player.emoji, 0, playerOffsetY); ctx.restore();
+        drawCenteredEmoji(ctx, player.emoji, 0, 0, player.size);
+        ctx.restore();
     }
 
     // --- 敵・アイテムの描画 ---
@@ -175,7 +261,6 @@ function render() {
         
         // アイテムのエフェクト
         if (obj.type === 'item') {
-            ctx.save();
             ctx.beginPath(); 
             ctx.arc(0, 0, obj.size * 1.5, 0, Math.PI * 2); // エフェクト円の原点
             if(obj.itemType === 'star') {
@@ -186,21 +271,17 @@ function render() {
                 ctx.fillStyle = 'rgba(255, 215, 0, 0.4)'; ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
                 ctx.fill(); ctx.stroke(); 
             }
-            ctx.restore();
         }
 
-        // ★修正: マルチデバイス対応。iOS等でのカラー絵文字の textBaseline ズレを吸収するため、
-        // 画面幅やDPRに依存せず、オブジェクトサイズに比例した微細なオフセット(y軸補正)を適用し、円の中心と完全に一致させる。
-        let emojiOffsetY = obj.size * 0.12; 
-
-        ctx.font = `${obj.size * 2}px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';
         if (obj.subType === 'side' && obj.facingRight) ctx.scale(-1, 1);
         
         if (obj.subType === 'tall') {
             let segs = obj.segments || 4, stepY = obj.size * 1.45, halfH = ((segs - 1) * stepY) / 2;
-            for (let s = 0; s < segs; s++) ctx.fillText(obj.emoji, 0, -halfH + s * stepY + emojiOffsetY);
+            for (let s = 0; s < segs; s++) {
+                drawCenteredEmoji(ctx, obj.emoji, 0, -halfH + s * stepY, obj.size);
+            }
         } else { 
-            ctx.fillText(obj.emoji, 0, emojiOffsetY); 
+            drawCenteredEmoji(ctx, obj.emoji, 0, 0, obj.size);
         }
         ctx.restore();
     }

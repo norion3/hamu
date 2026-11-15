@@ -1,4 +1,12 @@
 /**
+ * game.js
+ * ゲームのコアロジック、物理演算、AIディレクター（スポーン制御）、
+ * およびエンティティ（オブジェクト群）を管理するモジュール
+ * 
+ * [Version 1.6]
+ * - 修正内容: 画面の横幅（W）に応じた自動スケーリング（基準幅390px、0.75〜1.25でクランプ）を導入。
+ *   resizeTrack内で gameState.scale を自動算出し、プレイヤーサイズ・敵/アイテムサイズ・移動スピードに反映。
+ * 
  * [Version 1.5]
  * - 修正内容: レベルアップ時の確定回復アイテムが、スコアの同時加算によって
  *   スキップされる不具合を修正（20の倍数判定から、奇数レベル到達時判定へ変更）。
@@ -21,7 +29,7 @@ import { playSound } from './audio.js';
 // --------------------------------------------------------
 export const gameState = {
     status: 'START', // 'START', 'PLAYING', 'GAMEOVER'
-    W: 0, H: 0,
+    W: 0, H: 0, scale: 1,
     score: 0, level: 1, lives: 3, frames: 0,
     intervalFrames: 0, giantCooldown: 0, lastSpawnX: 0,
     triggerShake: false, // 被弾時・フィーバー撃破時の画面揺れフラグ
@@ -102,6 +110,9 @@ export function initGame(W, H) {
 export function resizeTrack(W, H) {
     gameState.W = W;
     gameState.H = H;
+    // 画面横幅Wから基準幅(390px)に対するスケール係数を自動算出（極端な端末向けに上下限クランプ）
+    gameState.scale = W > 0 ? Math.max(0.75, Math.min(1.25, W / 390)) : 1;
+    gameState.player.size = PHYSICS.PLAYER_SIZE * gameState.scale;
     gameState.track.w = W * 0.8;
     gameState.track.h = H * 0.22;
     gameState.track.x = (W - gameState.track.w) / 2;
@@ -129,8 +140,9 @@ export function getTrackCoordinates(pos) {
 // AIディレクター (賢くフェアなスポーン制御)
 // --------------------------------------------------------
 function spawnObject() {
+    const scale = gameState.scale || 1;
     const isItem = Math.random() < 0.025; 
-    const baseSpeed = 2.6 + Math.min(3.2, gameState.level * 0.22);
+    const baseSpeed = (2.6 + Math.min(3.2, gameState.level * 0.22)) * scale;
     const { W, H, track } = gameState;
 
     function createObj(type, subType, x, y, vy, vx, size, emoji) {
@@ -182,16 +194,16 @@ function spawnObject() {
             let leftX = track.x + (track.w * 0.25);
             let rightX = track.x + (track.w * 0.75);
             
-            let objUp = createObj('item', 'normal', leftX, -50, baseSpeed * 0.6, 0, 20, EMOJIS.ITEMS.SPEED_UP);
+            let objUp = createObj('item', 'normal', leftX, -50, baseSpeed * 0.6, 0, 20 * scale, EMOJIS.ITEMS.SPEED_UP);
             objUp.itemType = 'speed_up';
             gameState.objects.push(objUp);
             
-            let objDown = createObj('item', 'normal', rightX, -50, baseSpeed * 0.6, 0, 20, EMOJIS.ITEMS.SPEED_DOWN);
+            let objDown = createObj('item', 'normal', rightX, -50, baseSpeed * 0.6, 0, 20 * scale, EMOJIS.ITEMS.SPEED_DOWN);
             objDown.itemType = 'speed_down';
             gameState.objects.push(objDown);
         } else {
             // 通常アイテム（回復・星）
-            let obj = createObj('item', 'normal', 0, -50, baseSpeed * 0.6, 0, 20, '');
+            let obj = createObj('item', 'normal', 0, -50, baseSpeed * 0.6, 0, 20 * scale, '');
             if (gameState.player.feverFrames === 0 && Math.random() < 0.1) {
                 obj.itemType = 'star'; obj.emoji = EMOJIS.ITEMS.STAR;
             } else {
@@ -223,25 +235,25 @@ function spawnObject() {
 
     if (canSpawnSpecial && giants.length > 0 && gameState.giantCooldown <= 0 && r < 0.15) {
         let emj = giants[Math.floor(Math.random() * giants.length)];
-        let obj = createObj('enemy', 'giant', getSmartX(50), -50, baseSpeed * PHYSICS.GIANT_SPEED_MULT, 0, 50, emj);
+        let obj = createObj('enemy', 'giant', getSmartX(50 * scale), -50, baseSpeed * PHYSICS.GIANT_SPEED_MULT, 0, 50 * scale, emj);
         gameState.objects.push(obj); 
         gameState.giantCooldown = TIMERS.GIANT_COOLDOWN; 
     } 
     else if (canSpawnSpecial && talls.length > 0 && r < 0.25) {
         let emj = talls[Math.floor(Math.random() * talls.length)];
-        let obj = createObj('enemy', 'tall', getSmartX(18), -90, baseSpeed * PHYSICS.TALL_SPEED_MULT, 0, 18, emj);
+        let obj = createObj('enemy', 'tall', getSmartX(18 * scale), -90, baseSpeed * PHYSICS.TALL_SPEED_MULT, 0, 18 * scale, emj);
         obj.segments = 4; gameState.objects.push(obj);
     }
     else if (canSpawnSpecial && stutters.length > 0 && !hasStutterEnemy && r < 0.35) {
         let emj = stutters[Math.floor(Math.random() * stutters.length)];
-        let obj = createObj('enemy', 'stutter', getSmartX(22), -50, baseSpeed * 0.95, 0, 22, emj);
+        let obj = createObj('enemy', 'stutter', getSmartX(22 * scale), -50, baseSpeed * 0.95, 0, 22 * scale, emj);
         obj.baseX = obj.x; obj.stopY = H * (0.28 + Math.random() * 0.12); obj.stopTimer = TIMERS.STUTTER_STOP;
         gameState.objects.push(obj);
     }
     else if (canSpawnSpecial && sides.length > 0 && r < 0.50) {
         let emj = sides[Math.floor(Math.random() * sides.length)];
         let targetY = Math.random() < 0.5 ? track.y : track.y + track.h;
-        let obj = createObj('enemy', 'side', 0, targetY, 0, 0, 20, emj);
+        let obj = createObj('enemy', 'side', 0, targetY, 0, 0, 20 * scale, emj);
         obj.state = 'warning'; 
         obj.warningTimer = TIMERS.WARNING_FRAMES; 
         let fromLeft = Math.random() < 0.5;
@@ -252,19 +264,19 @@ function spawnObject() {
     } 
     else if (canSpawnSpecial && upwards.length > 0 && r < 0.65) {
         let emj = upwards[Math.floor(Math.random() * upwards.length)];
-        let obj = createObj('enemy', 'upward', getSmartX(20), H + 40, -baseSpeed * PHYSICS.UPWARD_SPEED_MULT, 0, 20, emj);
+        let obj = createObj('enemy', 'upward', getSmartX(20 * scale), H + 40, -baseSpeed * PHYSICS.UPWARD_SPEED_MULT, 0, 20 * scale, emj);
         obj.state = 'warning'; 
         obj.warningTimer = TIMERS.WARNING_FRAMES; 
         gameState.objects.push(obj);
     }
     else if (!isPanicZone && !isRestZone && diags.length > 0 && r < 0.80) {
-        let obj = createObj('enemy', 'diagonal', getSmartX(20), -50, baseSpeed * PHYSICS.DIAGONAL_SPEED_MULT, 0, 20, diags[Math.floor(Math.random() * diags.length)]);
+        let obj = createObj('enemy', 'diagonal', getSmartX(20 * scale), -50, baseSpeed * PHYSICS.DIAGONAL_SPEED_MULT, 0, 20 * scale, diags[Math.floor(Math.random() * diags.length)]);
         obj.vx = (Math.random() > 0.5 ? 1 : -1) * (baseSpeed * 0.5); 
         gameState.objects.push(obj);
     } 
     else {
         // 通常落下 
-        let obj = createObj('enemy', 'normal', getSmartX(20), -50, getVariedSpeed(baseSpeed), 0, 20, normals[Math.floor(Math.random() * normals.length)]);
+        let obj = createObj('enemy', 'normal', getSmartX(20 * scale), -50, getVariedSpeed(baseSpeed), 0, 20 * scale, normals[Math.floor(Math.random() * normals.length)]);
         
         for (let o of gameState.objects) {
             if (o.type === 'enemy' && o.subType === 'normal' && o.y < H * 0.6 && Math.abs(o.x - obj.x) < obj.size * 2.5) {
@@ -283,6 +295,7 @@ function spawnObject() {
 export function updateGame() {
     if (gameState.status !== 'PLAYING') return;
     const { W, H, track, player, objects, texts, particles } = gameState;
+    const scale = gameState.scale || 1;
 
     // --- レベルアップ ＆ ボーナス生成 ---
     let newLevel = Math.floor(gameState.score / 10) + 1;
@@ -293,9 +306,10 @@ export function updateGame() {
         gameState.level = newLevel; 
         
         if (shouldDropHeal) {
+            let itemSize = 20 * scale;
             let obj = {
                 type: 'item', subType: 'normal', state: 'active', warningTimer: 0,
-                size: 20, vx: 0, vy: 2.0, x: Math.max(20, Math.min(W - 20, track.x + Math.random() * track.w)), y: -50, 
+                size: itemSize, vx: 0, vy: 2.0 * scale, x: Math.max(itemSize, Math.min(W - itemSize, track.x + Math.random() * track.w)), y: -50, 
                 emoji: EMOJIS.ITEMS.HEAL, itemType: 'heal', facingRight: true, baseX: 0, swayPhase: 0, swaySpeed: 0, stopY: 0, stopTimer: 0, hasStopped: false
             };
             if (player.feverFrames === 0 && Math.random() < 0.1) { 
@@ -319,7 +333,7 @@ export function updateGame() {
     }
 
     let baseGrowthSpeed = Math.min(PHYSICS.PLAYER_MAX_SPEED, PHYSICS.PLAYER_START_SPEED + (gameState.score * PHYSICS.PLAYER_SPEED_GROWTH));
-    player.speed = baseGrowthSpeed + player.speedBuff;
+    player.speed = (baseGrowthSpeed + player.speedBuff) * scale;
 
     player.pos = (player.pos + player.dir * (player.speed * (player.feverFrames > 0 ? 1.5 : 1.0))) % track.perimeter;
     if (player.pos < 0) player.pos += track.perimeter;
