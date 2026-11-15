@@ -2,6 +2,12 @@
  * audio.js
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
+ * 
+ * [Version 1.1]
+ * - 修正内容: ミュート解除時（タップ時）にオーディオエンジンを確実に叩き起こす
+ *   安全装置を追加。iOSでの音声ミュート復帰バグ（音が出ない現象）を修正。
+ * - 修正内容: プレイ中のターン操作など、ユーザーのタップ起因で音が鳴る際にも
+ *   フェイルセーフとしてエンジン再起動を試みるよう playSound を強化。
  */
 
 // 音響エンジン（シンセサイザー群）と状態の保持
@@ -84,7 +90,13 @@ export async function initAudio() {
  * @param {string} type - 鳴らす音の種類 ('turn', 'hit', 'score', etc.)
  */
 export function playSound(type) {
-    if (!synths[type] || Tone.context.state !== 'running' || isMuted) return;
+    if (!synths[type] || isMuted) return;
+    
+    // ★修正点：iOS向け安全装置。万が一再生時にエンジンが寝ていれば、
+    // ユーザーのタップ起因（ターン操作時など）に乗じて叩き起こす
+    if (Tone.context.state !== 'running') {
+        Tone.start().catch(e => console.warn(e));
+    }
     
     const now = Tone.now();
     switch(type) {
@@ -119,6 +131,13 @@ export function playSound(type) {
  */
 export function toggleMute() {
     isMuted = !isMuted;
+    
+    // ★修正点：ミュートを解除した（ボタンをタップした）瞬間のコンテキストを利用して、
+    // 確実にオーディオエンジンを起動（または再開）させる
+    if (!isMuted) {
+        initAudio(); 
+    }
+    
     return isMuted;
 }
 
