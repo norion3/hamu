@@ -3,6 +3,10 @@
  * 画面UI（HTML/Tailwind）の動的インジェクト、イベントバインド、
  * およびiOS（WebKit）特有のスクロール・ラバーバンド防衛を行うモジュール
  * 
+ * [Version 1.4]
+ * - 修正内容: 初期化時のミュートアイコンの表示を、audio.jsの初期状態（isMuted=true）に合わせて、
+ *   最初から「ミュート（❌）マーク」が表示されるようにHTMLのhiddenクラスを入れ替え。
+ * 
  * [Version 1.3]
  * - 修正内容: スタート画面とゲームオーバー画面のモーダル位置を、縦長スマホでも
  *   親指が届きやすいように画面中央から下部寄り（justify-end と pb-[12vh]）へ動的に配置するよう調整。
@@ -105,8 +109,9 @@ function injectDOM() {
         <!-- ★修正：下部の余白(+12px)を削除し、純粋な safe-area-inset-bottom のみに最適化 -->
         <div class="bg-emerald-600 border-t-8 border-emerald-800 pt-3 px-3 pb-[env(safe-area-inset-bottom,0px)] min-h-[6rem] shrink-0 flex items-center justify-center gap-3 shadow-[0_-4px_15px_rgba(0,0,0,0.15)] z-20 relative w-full">
             <button id="muteBtn" class="h-full aspect-square bg-emerald-500 hover:bg-emerald-400 text-emerald-950 rounded-2xl shadow-[0_6px_0_#047857] active:shadow-[0_0px_0_#047857] active:translate-y-[6px] transition-all flex items-center justify-center border-4 border-emerald-300 shrink-0 text-emerald-900">
-                <svg id="muteIconOff" class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
-                <svg id="muteIconOn" class="w-8 h-8 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
+                <!-- ★修正: audio.js の初期値 isMuted = true に合わせて、初期状態でミュートマーク（On）を表示し、音出しマーク（Off）を隠す -->
+                <svg id="muteIconOff" class="w-8 h-8 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
+                <svg id="muteIconOn" class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
             </button>
 
             <button id="turnBtn" disabled class="flex-1 h-full bg-orange-400 hover:bg-orange-300 text-orange-950 font-black text-3xl rounded-3xl shadow-[0_6px_0_#9a3412] active:shadow-[0_0px_0_#9a3412] active:translate-y-[6px] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed group border-4 border-orange-200">

@@ -3,6 +3,10 @@
  * ゲームのコアロジック、物理演算、AIディレクター（スポーン制御）、
  * およびエンティティ（オブジェクト群）を管理するモジュール
  * 
+ * [Version 1.4]
+ * - 修正内容: フィーバー時（巨大化時）にアイテムの当たり判定が小さくなってしまうバグを修正。
+ * - 修正内容: アクティブレスト（休憩ゾーン）の波を少しマイルドにし、極端な虚無時間を緩和。
+ * 
  * [Version 1.3]
  * - 修正内容: 当たり判定の分離（敵は小さく、アイテムは大きく、フィーバー時は巨大化）。
  * - 修正内容: レベルアップ直後（スコア下1桁 9, 0, 1）にアクティブレスト（休憩ゾーン）を導入。
@@ -148,8 +152,7 @@ function spawnObject() {
     const s10 = gameState.score % 10;
     const isPanicZone = (gameState.score > 10 && (s10 === 7 || s10 === 8));
     
-    // ★追加: アクティブレスト（休憩ゾーン）
-    // 猛攻の直後やレベルアップ直後は、プレイヤーに息をつかせる
+    // アクティブレスト（休憩ゾーン）
     const isRestZone = (gameState.score > 0 && (s10 === 9 || s10 === 0 || s10 === 1));
 
     // フェアなランダム性と画面のフル活用
@@ -175,7 +178,6 @@ function spawnObject() {
 
     // --- アイテム生成 ---
     if (isItem) {
-        // ★修正: スピードアイテムの同時ドロップ判定（30%の確率でスピードアイテム抽選）
         if (gameState.level >= 2 && Math.random() < 0.3) {
             let leftX = track.x + (track.w * 0.25);
             let rightX = track.x + (track.w * 0.75);
@@ -217,7 +219,6 @@ function spawnObject() {
     const hasTallEnemy = gameState.objects.some(o => o.subType === 'tall');
     const hasStutterEnemy = gameState.objects.some(o => o.subType === 'stutter');
 
-    // ★修正: アクティブレスト中（isRestZone）は、特殊攻撃を一切スポーンさせない
     const canSpawnSpecial = !isPanicZone && !isRestZone && !hasSideEnemy && !hasUpwardEnemy && !hasGiantEnemy && !hasTallEnemy;
 
     if (canSpawnSpecial && giants.length > 0 && gameState.giantCooldown <= 0 && r < 0.15) {
@@ -308,13 +309,11 @@ export function updateGame() {
     if (player.feverFrames > 0) player.feverFrames--;
     if (gameState.giantCooldown > 0) gameState.giantCooldown--;
     
-    // ★追加: スピードバフのタイマー管理
     if (player.buffFrames > 0) {
         player.buffFrames--;
         if (player.buffFrames <= 0) player.speedBuff = 0; // タイマー切れでバフリセット
     }
 
-    // ★追加: 最終スピードの計算（ベース成長 + バフ補正）
     let baseGrowthSpeed = Math.min(PHYSICS.PLAYER_MAX_SPEED, PHYSICS.PLAYER_START_SPEED + (gameState.score * PHYSICS.PLAYER_SPEED_GROWTH));
     player.speed = baseGrowthSpeed + player.speedBuff;
 
@@ -340,7 +339,8 @@ export function updateGame() {
         let spawnInterval = baseInterval;
         
         // 波（ウェーブ）の調整
-        if (isRestZone) spawnInterval = Math.floor(baseInterval * 1.5); // ★休憩ゾーン：間隔を伸ばす
+        // ★修正：極端な虚無時間を避けるため、休憩ゾーンの間隔を 1.5倍 から 1.25倍 へマイルドに緩和
+        if (isRestZone) spawnInterval = Math.floor(baseInterval * 1.25); 
         else if (isPanicZone) spawnInterval = Math.max(20, Math.floor(baseInterval * 0.45));
         else if (isRush) spawnInterval = Math.max(26, Math.floor(baseInterval * 0.6));
         
@@ -379,10 +379,11 @@ export function updateGame() {
         
         // --- 衝突判定（★追加: 完全分離ロジック） ---
         let hitRadius;
-        if (obj.type === 'item') {
-            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_ITEM; // 吸い取りやすく
-        } else if (player.feverFrames > 0) {
-            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_FEVER; // 巨大化なぎ倒し
+        // ★修正: フィーバー中（巨大化中）の判定を最優先にすることで、アイテムにも巨大な判定を適用させる
+        if (player.feverFrames > 0) {
+            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_FEVER; // 巨大化（アイテムも吸い込む）
+        } else if (obj.type === 'item') {
+            hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_ITEM;  // 通常時のアイテム吸収
         } else {
             hitRadius = (player.size + obj.size) * PHYSICS.HITBOX_ENEMY; // 極小化（ニアミス許容）
         }
@@ -404,7 +405,7 @@ export function updateGame() {
                     gameState.score += 1; 
                     texts.push(new FloatingText("+1", obj.x, drawY, "#2563eb", 24)); 
                     playSound('blast'); 
-                    gameState.triggerShake = true; // ★追加: フィーバー撃破時も揺らして爽快感UP
+                    gameState.triggerShake = true; 
                 } else if (player.invincible === 0) {
                     gameState.lives--; 
                     playSound('hit'); 
@@ -412,7 +413,6 @@ export function updateGame() {
                     if (gameState.lives <= 0) gameState.status = 'GAMEOVER';
                     else player.invincible = TIMERS.INVINCIBLE_FRAMES;
                     
-                    // 被弾時はバフを強制リセットしてペナルティ
                     player.speedBuff = 0; 
                     player.buffFrames = 0;
                 }
@@ -426,7 +426,6 @@ export function updateGame() {
                     player.feverFrames = TIMERS.FEVER_FRAMES; 
                     playSound('fever'); 
                 }
-                // ★追加: スピードアイテムの効果適用
                 else if (obj.itemType === 'speed_up') {
                     player.speedBuff = PHYSICS.PLAYER_SPEED_UP_BUFF;
                     player.buffFrames = TIMERS.BUFF_FRAMES;

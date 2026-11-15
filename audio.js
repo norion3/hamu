@@ -3,6 +3,11 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
+ * [Version 1.6]
+ * - 修正内容: iOSでのバックグラウンド復帰時のクラッシュ回避のため、visibilitychange内での
+ *   強制的な initAudio() 呼び出しを削除。楽器の破棄とプロパティの消去のみを行い、
+ *   復帰後の最初のタップ操作（playSoundのturn）で安全に再構築するようロジックを変更。
+ * 
  * [Version 1.5]
  * - 修正内容: 初期状態を本来のミュート(isMuted=true)に戻し、UIとの矛盾を解消。
  * - 修正内容: 画面がバックグラウンドから復帰したこと（visibilitychange）を自動検知し、
@@ -89,13 +94,18 @@ export async function initAudio() {
  * @param {string} type - 鳴らす音の種類 ('turn', 'hit', 'score', etc.)
  */
 export function playSound(type) {
-    if (!synths[type] || isMuted) return;
-    
     // ユーザーが画面をタップした証拠である「turn（Uターン）」の瞬間にだけ、
-    // エンジンが寝ていれば叩き起こす（Tone.start）。
-    if (Tone.context.state !== 'running' && type === 'turn') {
-        Tone.start().catch(e => console.warn(e));
+    // 未初期化なら初期化し、エンジンが寝ていれば叩き起こす（Tone.start）。
+    if (type === 'turn') {
+        if (!isInitialized) {
+            setupSynths();
+        }
+        if (Tone.context.state !== 'running') {
+            Tone.start().catch(e => console.warn(e));
+        }
     }
+
+    if (!synths[type] || isMuted) return;
     
     const now = Tone.now();
     switch(type) {
@@ -157,22 +167,24 @@ export function getMuteState() {
 
 /**
  * ★追加：画面の表示状態（バックグラウンドからの復帰）を監視し、
- * もしプレイヤーがミュートを解除して遊んでいた場合は、自動的にハードリセットをかけてゾンビ化を防ぐ
+ * もしプレイヤーがミュートを解除して遊んでいた場合は、破棄だけ行い、
+ * ユーザーのタップを伴わない不要な initAudio の呼び出しを避ける
  */
 if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && !isMuted) {
-            // 画面に復帰した瞬間、古い楽器を破棄して初期化フラグをリセット
+            // 画面に復帰した瞬間、古い楽器を破棄してプロパティも削除
             if (isInitialized) {
                 for (let key in synths) {
                     if (synths[key] && typeof synths[key].dispose === 'function') {
                         synths[key].dispose();
                     }
+                    delete synths[key]; // プロパティ自体を消去し、エラーを防止
                 }
                 isInitialized = false;
             }
-            // 次のユーザー操作（Uターン等）に備えて新品の楽器を作り直す
-            initAudio();
+            // ★修正：ここでの initAudio() は非ユーザーアクションのため削除。
+            // 次のタップ操作（turn）時に自動的に再構築されます。
         }
     });
 }
