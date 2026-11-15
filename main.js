@@ -1,6 +1,11 @@
 /**
  * main.js
  * ゲームのメインループ、描画レンダリング、および各モジュールの統合を担う心臓部
+ * 
+ * [Version 1.1]
+ * - 修正内容: 描画負荷軽減（パフォーマンス最適化）のため、毎フレーム実行されていた
+ *   トラック（足跡）と影(shadowBlur)の描画をオフスクリーンCanvasにキャッシュする仕組みを追加。
+ *   これにより、低スペックな古いiPhone等でのバッテリー消費とカクつき（処理落ち）を防止。
  */
 
 import { EMOJI_FONT, BG_PALETTES } from './constants.js';
@@ -11,6 +16,41 @@ import { initDOM, updateHUD, triggerShakeUI, setScreens } from './dom.js';
 
 let canvas, ctx;
 
+// --- オフスクリーンCanvasの準備（足跡描画のキャッシュ用） ---
+const trackCanvas = document.createElement('canvas');
+const trackCtx = trackCanvas.getContext('2d');
+
+/**
+ * トラック（足跡）の静止画像を生成してキャッシュする
+ * リサイズ時（初回含む）に1度だけ呼ばれ、毎フレームの描画負荷を劇的に下げる
+ */
+function updateTrackCache(w, h, dpr) {
+    trackCanvas.width = w * dpr;
+    trackCanvas.height = h * dpr;
+    trackCtx.scale(dpr, dpr);
+    trackCtx.clearRect(0, 0, w, h);
+
+    trackCtx.save();
+    trackCtx.font = `14px ${EMOJI_FONT}`; trackCtx.textAlign = 'center'; trackCtx.textBaseline = 'middle';
+    trackCtx.shadowColor = 'rgba(0, 0, 0, 0.45)'; trackCtx.shadowBlur = 5; trackCtx.globalAlpha = 0.95; 
+    
+    for (let p = 0; p < gameState.track.perimeter; p += 25) {
+        let coords = getTrackCoordinates(p);
+        trackCtx.save(); trackCtx.translate(coords.x, coords.y);
+        
+        if (coords.vx === 1) trackCtx.rotate(Math.PI / 2);
+        else if (coords.vx === -1) trackCtx.rotate(-Math.PI / 2);
+        else if (Math.abs(coords.x - gameState.track.x) < 1) trackCtx.rotate(0);
+        else trackCtx.rotate(Math.PI);
+        
+        // 足跡が明るい背景でも際立つように白フチ付きで描画
+        trackCtx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; trackCtx.lineWidth = 3;
+        trackCtx.strokeText('🐾', 0, 0); trackCtx.fillText('🐾', 0, 0);
+        trackCtx.restore();
+    }
+    trackCtx.restore();
+}
+
 /**
  * 画面リサイズ時の処理
  */
@@ -20,6 +60,9 @@ function resize(w, h) {
     canvas.height = h * dpr;
     ctx.scale(dpr, dpr);
     resizeTrack(w, h);
+    
+    // 足跡画像のキャッシュを更新
+    updateTrackCache(w, h, dpr);
 }
 
 /**
@@ -79,23 +122,9 @@ function render() {
         ctx.restore();
     }
 
-    // --- トラック（足跡）の描画 ---
-    ctx.save();
-    ctx.font = `14px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)'; ctx.shadowBlur = 5; ctx.globalAlpha = 0.95; 
-    for (let p = 0; p < gameState.track.perimeter; p += 25) {
-        let coords = getTrackCoordinates(p);
-        ctx.save(); ctx.translate(coords.x, coords.y);
-        if (coords.vx === 1) ctx.rotate(Math.PI / 2);
-        else if (coords.vx === -1) ctx.rotate(-Math.PI / 2);
-        else if (Math.abs(coords.x - gameState.track.x) < 1) ctx.rotate(0);
-        else ctx.rotate(Math.PI);
-        // 足跡が明るい背景でも際立つように白フチ付きで描画
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)'; ctx.lineWidth = 3;
-        ctx.strokeText('🐾', 0, 0); ctx.fillText('🐾', 0, 0);
-        ctx.restore();
-    }
-    ctx.restore();
+    // --- トラック（足跡）の描画（キャッシュを利用） ---
+    // オフスクリーンCanvasに描画済みの画像を1枚貼り付けるだけになり、毎フレームの負荷が激減
+    ctx.drawImage(trackCanvas, 0, 0, gameState.W, gameState.H);
 
     // --- プレイヤー（ハムスター）の描画 ---
     const player = gameState.player;
