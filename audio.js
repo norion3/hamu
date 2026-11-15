@@ -3,16 +3,15 @@
  * Tone.jsを用いた音声の初期化、再生、およびミュート状態を管理するモジュール
  * iOS特有のオーディオコンテキスト制約（ユーザー操作による起動必須）を安全に処理します。
  * 
- * [Version 1.2]
- * - 修正内容: 画面復帰時の音消失（サスペンド）バグを完全修正。自動再生音（スコア等）での
- *   無許可の起動を禁止し、iOSによるオーディオエンジンの永久凍結を防止。
- * - 修正内容: ミュート解除時およびターン操作時に、明示的に `context.resume()` を呼び出し
- *   安全かつ確実にエンジンを再起動（サスペンド解除）するロジックに変更。
+ * [Version 1.3]
+ * - 修正内容: 初期状態をUIと合わせてミュート解除(isMuted=false)に変更。
+ * - 修正内容: 再生時の過剰なブロック(return)を撤廃し、ターン操作(タップ)時にのみ
+ *   Tone.start() を呼び出して安全にオーディオエンジンを叩き起こすシンプルで堅牢な設計に修正。
  */
 
 // 音響エンジン（シンセサイザー群）と状態の保持
 const synths = {};
-let isMuted = true; // 初期状態はミュート（安全のため）
+let isMuted = false; // ★修正: 初期状態をミュート解除（UIのアイコンと矛盾させない）
 let isInitialized = false;
 
 /**
@@ -78,7 +77,6 @@ export async function initAudio() {
     try {
         if (Tone.context.state !== 'running') {
             await Tone.start();
-            await Tone.context.resume(); // ★念押しの明示的再起動（サスペンド解除）
         }
         setupSynths();
     } catch (e) {
@@ -93,14 +91,11 @@ export async function initAudio() {
 export function playSound(type) {
     if (!synths[type] || isMuted) return;
     
-    // ★修正点：自動発火する音（スコア等）で勝手にエンジンを起こすとiOSに永久凍結されるため、
-    // ユーザーが直接画面をタップした証拠である「turn」の時だけ再起動（resume）を許可する。
-    if (Tone.context.state !== 'running') {
-        if (type === 'turn') {
-            Tone.context.resume().catch(e => console.warn(e));
-        } else {
-            return; // エンジンが寝ている時の自動再生音はあえて無視する（永久凍結防止）
-        }
+    // ★修正点: 過剰なブロックを廃止。ユーザーが画面をタップした証拠である
+    // 「turn（Uターン）」の瞬間にだけ、エンジンが寝ていれば叩き起こす（Tone.start）。
+    // それ以外の自動再生音は、ブロックせずにそのまま鳴らす指示を出す。
+    if (Tone.context.state !== 'running' && type === 'turn') {
+        Tone.start().catch(e => console.warn(e));
     }
     
     const now = Tone.now();
@@ -137,13 +132,9 @@ export function playSound(type) {
 export function toggleMute() {
     isMuted = !isMuted;
     
-    // ★修正点：ミュート解除（ボタンのタップ時）に確実にエンジンを叩き起こす
+    // ミュート解除（ボタンのタップ時）に確実にエンジンを叩き起こす
     if (!isMuted) {
         initAudio(); 
-        // 確実にサスペンド状態を解除する
-        if (Tone.context.state !== 'running') {
-            Tone.context.resume().catch(e => console.warn(e));
-        }
     }
     
     return isMuted;
