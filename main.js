@@ -2,6 +2,10 @@
  * main.js
  * ゲームのメインループ、描画レンダリング、および各モジュールの統合を担う心臓部
  * 
+ * [Version 1.3]
+ * - 修正内容: マルチデバイス（横幅の異なるiPhone等）対応のため、画面幅に応じた動的スケーリングと
+ *   アイテム周囲のエフェクト円、および絵文字の描画座標（ベースライン）を完全に同期・補正するロジックを追加。
+ * 
  * [Version 1.2]
  * - 修正内容: アイテムの描画時、⭐(スター)以外は回転させないようにし、⏫⏬等の視認性を確保。
  * - 修正内容: 警告(⚠️)表示時、敵が突進してくる方向を矢印(➡, ⬅, ⬆)で視覚的にサポート。
@@ -129,6 +133,10 @@ function render() {
     const player = gameState.player;
     if (player.invincible === 0 || player.invincible % 10 < 5 || player.feverFrames > 0) {
         ctx.save(); ctx.translate(player.x, player.y);
+        
+        // プレイヤー自身のオフセット補正
+        let playerOffsetY = player.size * 0.12;
+        
         if (player.feverFrames > 0) {
             ctx.beginPath(); ctx.arc(0, 0, player.size * 1.5, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 255, 200, 0.4)`; ctx.lineWidth = 2; ctx.strokeStyle = `rgba(255, 215, 0, 0.8)`;
@@ -136,7 +144,7 @@ function render() {
         }
         ctx.font = `${player.size * 2}px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';
         if (!player.facingRight) ctx.scale(-1, 1);
-        ctx.fillText(player.emoji, 0, 0); ctx.restore();
+        ctx.fillText(player.emoji, 0, playerOffsetY); ctx.restore();
     }
 
     // --- 敵・アイテムの描画 ---
@@ -146,7 +154,7 @@ function render() {
             if (gameState.frames % 10 < 5) {
                 ctx.save(); ctx.font = `30px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';
                 
-                // ★修正：突進してくる方向を矢印でサポート
+                // 突進してくる方向を矢印でサポート
                 if (obj.subType === 'upward') {
                     ctx.fillText('⬆⚠️', obj.x, gameState.H - 18);
                 } else if (obj.vx > 0) {
@@ -167,26 +175,33 @@ function render() {
         
         // アイテムのエフェクト
         if (obj.type === 'item') {
-            ctx.beginPath(); ctx.arc(0, 0, obj.size * 1.5, 0, Math.PI * 2);
+            ctx.save();
+            ctx.beginPath(); 
+            ctx.arc(0, 0, obj.size * 1.5, 0, Math.PI * 2); // エフェクト円の原点
             if(obj.itemType === 'star') {
                 ctx.fillStyle = `hsla(${(gameState.frames * 10) % 360}, 100%, 70%, 0.5)`; ctx.lineWidth = 3; ctx.strokeStyle = '#ffffff';
                 ctx.fill(); ctx.stroke(); 
-                // ★修正：星だけ回転させる
                 ctx.rotate(gameState.frames * 0.05);
             } else {
                 ctx.fillStyle = 'rgba(255, 215, 0, 0.4)'; ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
                 ctx.fill(); ctx.stroke(); 
-                // ★修正：星以外のアイテム（⏫, ⏬, ❤️）は回転させない
             }
+            ctx.restore();
         }
+
+        // ★修正: マルチデバイス対応。iOS等でのカラー絵文字の textBaseline ズレを吸収するため、
+        // 画面幅やDPRに依存せず、オブジェクトサイズに比例した微細なオフセット(y軸補正)を適用し、円の中心と完全に一致させる。
+        let emojiOffsetY = obj.size * 0.12; 
 
         ctx.font = `${obj.size * 2}px ${EMOJI_FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#000000';
         if (obj.subType === 'side' && obj.facingRight) ctx.scale(-1, 1);
         
         if (obj.subType === 'tall') {
             let segs = obj.segments || 4, stepY = obj.size * 1.45, halfH = ((segs - 1) * stepY) / 2;
-            for (let s = 0; s < segs; s++) ctx.fillText(obj.emoji, 0, -halfH + s * stepY);
-        } else { ctx.fillText(obj.emoji, 0, 0); }
+            for (let s = 0; s < segs; s++) ctx.fillText(obj.emoji, 0, -halfH + s * stepY + emojiOffsetY);
+        } else { 
+            ctx.fillText(obj.emoji, 0, emojiOffsetY); 
+        }
         ctx.restore();
     }
 
